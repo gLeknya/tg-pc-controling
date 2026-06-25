@@ -9,6 +9,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bot")
 
+# Отключаем спам HTTP-запросов от библиотек telegram и httpx
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
+
 # Загрузка переменных окружения из .env
 if os.path.exists(".env"):
     logger.info("Загрузка .env")
