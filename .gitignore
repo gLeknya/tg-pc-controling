@@ -40,3 +40,4 @@ env.rm
 *.njsproj
 *.sln
 *.sw?
+.agents/
