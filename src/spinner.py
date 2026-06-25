@@ -6,7 +6,7 @@ from src.config import SYMBOLS, WORDS
 from src.models import (
     get_tree, get_msg_id, get_task, set_task, pop_task, pop_tree, pop_msg_id
 )
-from src.rendering import render
+from src.rendering import render, collapse_row
 
 # ══════════════════════════════════════════════════════════════
 #  СПИННЕР
@@ -17,7 +17,7 @@ async def _spin_loop(bot: Bot, chat_id: int):
         await asyncio.sleep(0.5)
         tree   = get_tree(chat_id)
         msg_id = get_msg_id(chat_id)
-        if not tree or not msg_id or tree.loading_idx < 0:
+        if not tree or not msg_id or tree.loading_idx < 0 or tree.loading_idx >= len(tree.rows):
             break
 
         tree.spin_idx += tree.spin_dir
@@ -25,6 +25,14 @@ async def _spin_loop(bot: Bot, chat_id: int):
         elif tree.spin_idx < 0:           tree.spin_idx, tree.spin_dir = 1, 1
 
         try:
+            # Вставляем промежуточно загруженные дочерние строки в дерево
+            collapse_row(tree, tree.loading_idx)
+            tree.rows[tree.loading_idx].expanded = True
+            
+            if tree.loaded_rows:
+                children = list(tree.loaded_rows)
+                tree.rows = tree.rows[:tree.loading_idx + 1] + children + tree.rows[tree.loading_idx + 1:]
+
             await bot.edit_message_text(
                 chat_id=chat_id, message_id=msg_id,
                 text=render(tree), parse_mode="HTML",

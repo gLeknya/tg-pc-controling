@@ -1,3 +1,4 @@
+import html
 from pathlib import Path
 from src.config import SYMBOLS, get_bot_username
 from src.registry import reg
@@ -43,22 +44,35 @@ def render(tree: Tree) -> str:
     sym   = SYMBOLS[tree.spin_idx]
     bot_username = get_bot_username()
 
+    # Вычисляем позицию спиннера: под последним загруженным элементом папки
+    spinner_idx = tree.loading_idx
+    spinner_indent = ""
+    if tree.loading_idx >= 0 and tree.loading_idx < len(tree.rows):
+        parent_row = tree.rows[tree.loading_idx]
+        spinner_indent = parent_row.child_indent
+        plen = len(parent_row.prefix)
+        end = tree.loading_idx + 1
+        while end < len(tree.rows) and len(tree.rows[end].prefix) > plen:
+            end += 1
+        spinner_idx = end - 1
+
     for i, row in enumerate(tree.rows):
+        escaped_name = html.escape(row.name)
         if row.is_dir:
             icon = "▾ 📁" if row.expanded else "📁"
             key  = reg(row.path)
             url  = f"https://t.me/{bot_username}?start=cd_{key}"
-            lines.append(f'{row.prefix}<a href="{url}">{icon} {row.name}</a>')
+            lines.append(f'{row.prefix}<a href="{url}">{icon} {escaped_name}</a>')
         else:
             if is_image(row.path):
                 key = reg(row.path)
                 url = f"https://t.me/{bot_username}?start=view_{key}"
-                lines.append(f'{row.prefix}<a href="{url}">🖼 {row.name}</a>')
+                lines.append(f'{row.prefix}<a href="{url}">🖼 {escaped_name}</a>')
             else:
-                lines.append(f"{row.prefix}📄 {row.name}")
+                lines.append(f"{row.prefix}📄 {escaped_name}")
 
-        # Спиннер вставляется сразу после загружаемой строки
-        if i == tree.loading_idx:
-            lines.append(f"{row.child_indent}{sym} {tree.spin_word}...")
+        # Спиннер вставляется сразу после вычисленной строки
+        if i == spinner_idx and tree.loading_idx >= 0:
+            lines.append(f"{spinner_indent}{sym} {tree.spin_word}...")
 
     return "\n".join(lines)

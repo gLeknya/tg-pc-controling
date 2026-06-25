@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 #  МОДЕЛЬ ДЕРЕВА
 # ══════════════════════════════════════════════════════════════
 
+from typing import Optional
+
 @dataclass
 class Row:
     path:         str
@@ -22,11 +24,14 @@ class Tree:
     spin_idx:    int = 0
     spin_dir:    int = 1
     spin_word:   str = ""
+    loading_path: Optional[str] = None
+    loaded_rows: list[Row] = field(default_factory=list)
 
 # Состояние по чатам
 _trees: dict[int, Tree]         = {}
 _msgs:  dict[int, int]          = {}   # chat_id → message_id дерева
 _tasks: dict[int, asyncio.Task] = {}
+_load_tasks: dict[int, asyncio.Task] = {}
 
 def get_tree(chat_id: int) -> Tree | None:
     return _trees.get(chat_id)
@@ -54,3 +59,12 @@ def set_task(chat_id: int, task: asyncio.Task):
 
 def pop_task(chat_id: int) -> asyncio.Task | None:
     return _tasks.pop(chat_id, None)
+
+def get_load_task(chat_id: int) -> asyncio.Task | None:
+    return _load_tasks.get(chat_id)
+
+def set_load_task(chat_id: int, task: asyncio.Task):
+    _load_tasks[chat_id] = task
+
+def pop_load_task(chat_id: int) -> asyncio.Task | None:
+    return _load_tasks.pop(chat_id, None)

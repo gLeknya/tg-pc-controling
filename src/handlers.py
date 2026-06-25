@@ -16,7 +16,8 @@ logger = logging.getLogger("bot.handlers")
 from src.config import allowed, set_bot_username, get_bot_username, connect_user, get_connected_user
 from src.registry import dereg
 from src.models import (
-    Row, Tree, get_tree, get_msg_id, set_tree, set_msg_id
+    Row, Tree, get_tree, get_msg_id, set_tree, set_msg_id,
+    get_load_task, set_load_task, pop_load_task
 )
 from src.fs import get_drives, listdir
 from src.rendering import render, build_rows, collapse_row
@@ -69,6 +70,50 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_msg_id(chat_id, msg.message_id)
 
 
+async def _load_directory_incrementally(bot: Bot, chat_id: int, path: str, indent: str, row_path: str):
+    """Фоновая задача, которая постепенно считывает элементы и добавляет их в дерево."""
+    try:
+        # Сначала получаем все файлы и папки в потоке
+        dirs, files = await asyncio.to_thread(listdir, path)
+        all_items = list(dirs) + list(files)
+        
+        # Если папка пуста
+        if not all_items:
+            tree = get_tree(chat_id)
+            if tree and tree.loading_path == row_path:
+                tree.loaded_rows = [Row(
+                    path="", name="(пусто)", is_dir=False,
+                    prefix=indent + "└ ",
+                    child_indent="",
+                )]
+            return
+
+        # Инкрементируем и считываем элементы поочередно
+        for i, item in enumerate(all_items):
+            # Небольшая задержка для плавного появления (UX/UI эффект)
+            await asyncio.sleep(0.06)
+            
+            tree = get_tree(chat_id)
+            if not tree or tree.loading_path != row_path:
+                # Чат был перезапущен, папка закрыта или открыта другая папка
+                return
+
+            last = (i == len(all_items) - 1)
+            new_row = Row(
+                path=str(item), name=item.name,
+                is_dir=item in dirs,
+                prefix=indent + ("└ " if last else "├ "),
+                child_indent=indent + ("    " if last else "│   "),
+            )
+            tree.loaded_rows.append(new_row)
+            
+    except asyncio.CancelledError:
+        # Задача была отменена
+        raise
+    except Exception as e:
+        logger.error(f"Error loading directory incrementally {path}: {e}")
+
+
 async def _navigate(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str):
     """Вызывается когда пользователь кликнул на ссылку папки."""
     chat_id = update.effective_chat.id
@@ -104,35 +149,89 @@ async def _navigate(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str
 
     row = tree.rows[row_idx]
 
+    # Если кликнули по папке, которая в данный момент загружается — отменяем и сворачиваем
+    if tree.loading_path == path:
+        old_load_task = pop_load_task(chat_id)
+        if old_load_task:
+            old_load_task.cancel()
+            try:
+                await old_load_task
+            except asyncio.CancelledError:
+                pass
+        await stop_spin(chat_id)
+        collapse_row(tree, row_idx)
+        tree.loading_idx = -1
+        tree.loading_path = None
+        tree.loaded_rows = []
+        await edit_message(context.bot, chat_id)
+        return
+
     # Тогл: уже развёрнуто → сворачиваем
     if row.expanded:
         collapse_row(tree, row_idx)
         await edit_message(context.bot, chat_id)
         return
 
+    # Отменяем предыдущую задачу загрузки, если она запущена для другой папки
+    old_load_task = pop_load_task(chat_id)
+    if old_load_task:
+        old_load_task.cancel()
+        try:
+            await old_load_task
+        except asyncio.CancelledError:
+            pass
+
+    # Останавливаем старый спиннер и сворачиваем предыдущую загружаемую папку
+    if tree.loading_idx >= 0:
+        prev_idx = tree.loading_idx
+        await stop_spin(chat_id)
+        collapse_row(tree, prev_idx)
+        # Заново ищем индекс нашей целевой папки, так как список rows изменился
+        row_idx = next((i for i, r in enumerate(tree.rows) if r.path == path), -1)
+        if row_idx < 0:
+            logger.warning(f"Chat {chat_id}: path {path} not in tree after collapsing previous folder")
+            return
+        row = tree.rows[row_idx]
+
+    # Подготавливаем переменные в Tree для отслеживания загрузки
+    tree.loading_path = path
+    tree.loaded_rows = []
+
     # Разворачиваем: сначала показываем спиннер
+    tree.rows[row_idx].expanded = True
     start_spin(context.bot, chat_id, row_idx)
     await edit_message(context.bot, chat_id)
 
-    # Загружаем содержимое в фоне
-    dirs, files = await asyncio.to_thread(listdir, path)
+    # Создаем и запускаем задачу инкрементальной загрузки в фоне
+    load_task = asyncio.create_task(_load_directory_incrementally(
+        context.bot, chat_id, path, row.child_indent, path
+    ))
+    set_load_task(chat_id, load_task)
+
+    try:
+        await load_task
+    except asyncio.CancelledError:
+        return
+    finally:
+        pop_load_task(chat_id)
+
+    # Останавливаем спиннер
     await stop_spin(chat_id)
 
-    # Строим дочерние строки и вставляем их после родителя
-    children = build_rows(dirs, files, row.child_indent)
-    if not children:
-        children = [Row(
-            path="", name="(пусто)", is_dir=False,
-            prefix=row.child_indent + "└ ",
-            child_indent="",
-        )]
-
-    # Найти row ещё раз на случай изменений пока грузились
-    row_idx = next((i for i, r in enumerate(tree.rows) if r.path == path), row_idx)
-    tree.rows = tree.rows[:row_idx + 1] + children + tree.rows[row_idx + 1:]
-    tree.rows[row_idx].expanded = True
-
-    await edit_message(context.bot, chat_id)
+    # Делаем финальное обновление дерева
+    tree = get_tree(chat_id)
+    if tree and tree.loading_path == path:
+        row_idx = next((i for i, r in enumerate(tree.rows) if r.path == path), row_idx)
+        if row_idx >= 0:
+            collapse_row(tree, row_idx)
+            tree.rows = tree.rows[:row_idx + 1] + tree.loaded_rows + tree.rows[row_idx + 1:]
+            tree.rows[row_idx].expanded = True
+            
+        tree.loading_idx = -1
+        tree.loading_path = None
+        tree.loaded_rows = []
+        
+        await edit_message(context.bot, chat_id)
 
 
 async def _view_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str):
