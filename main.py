@@ -24,11 +24,16 @@ from src.handlers import (
     handle_document
 )
 
+import logging
+
+logger = logging.getLogger("bot.main")
+
 # ══════════════════════════════════════════════════════════════
 #  ЗАПУСК
 # ══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
+    logger.info("Инициализация Telegram-бота...")
     # Инициализация приложения Telegram-бота с токеном из config
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     
@@ -50,4 +55,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     
     # Запуск поллинга
+    logger.info("Бот успешно настроен. Запуск polling (ожидание сообщений)...")
     app.run_polling()

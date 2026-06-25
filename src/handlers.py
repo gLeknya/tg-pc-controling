@@ -3,11 +3,14 @@ import asyncio
 import platform
 import fnmatch
 import subprocess
+import logging
 from pathlib import Path
 from typing import Optional
 from telegram import Update, Bot
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
+
+logger = logging.getLogger("bot.handlers")
 
 # Конфиг и вспомогательные функции
 from src.config import allowed, set_bot_username, get_bot_username
@@ -24,9 +27,11 @@ from src.spinner import start_spin, stop_spin, edit_message
 # ══════════════════════════════════════════════════════════════
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update.effective_user.id): 
+    user = update.effective_user
+    if not allowed(user.id): 
         return
 
+    logger.info(f"Пользователь {user.id} (@{user.username or 'unknown'}) запросил стартовый экран дисков.")
     set_bot_username(context.bot.username)
     chat_id = update.effective_chat.id
 
@@ -62,6 +67,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _navigate(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str):
     """Вызывается когда пользователь кликнул на ссылку папки."""
     chat_id = update.effective_chat.id
+    user = update.effective_user
 
     # Удаляем "/start cd_..." сообщение которое отправил Telegram при клике
     try: 
@@ -71,30 +77,37 @@ async def _navigate(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str
 
     path = dereg(key)
     if not path: 
+        logger.warning(f"Пользователь {user.id} (@{user.username or 'unknown'}) передал недействительный ключ навигации: {key}")
         return
+
+    logger.info(f"Пользователь {user.id} (@{user.username or 'unknown'}) запросил навигацию по пути: {path}")
 
     tree = get_tree(chat_id)
     msg_id = get_msg_id(chat_id)
 
     # Нет активного дерева — запускаем с нуля
     if not tree or not msg_id:
+        logger.info(f"Активное дерево не найдено для чата {chat_id}, запускаем cmd_start.")
         await cmd_start(update, context)
         return
 
     # Ищем строку с этим путём
     row_idx = next((i for i, r in enumerate(tree.rows) if r.path == path), -1)
     if row_idx < 0: 
+        logger.warning(f"Путь {path} не найден в текущих строках дерева для чата {chat_id}")
         return
 
     row = tree.rows[row_idx]
 
     # Тогл: уже развёрнуто → сворачиваем
     if row.expanded:
+        logger.info(f"Сворачиваем папку: {path}")
         collapse_row(tree, row_idx)
         await edit_message(context.bot, chat_id)
         return
 
     # Разворачиваем: сначала показываем спиннер
+    logger.info(f"Разворачиваем папку (запуск спиннера): {path}")
     start_spin(context.bot, chat_id, row_idx)
     await edit_message(context.bot, chat_id)
 
@@ -124,8 +137,10 @@ async def _navigate(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str
 # ══════════════════════════════════════════════════════════════
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update.effective_user.id): 
+    user = update.effective_user
+    if not allowed(user.id): 
         return
+    logger.info(f"Пользователь {user.id} (@{user.username or 'unknown'}) вызвал справку (/help)")
     await update.message.reply_text(
         "🖥 <b>SSH-бот (Управление ПК)</b>\n\n"
         "<b>Навигация:</b>\n"
@@ -145,12 +160,14 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_exec(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update.effective_user.id): 
+    user = update.effective_user
+    if not allowed(user.id): 
         return
     if not context.args:
         await update.message.reply_text("Использование: /exec &lt;команда&gt;", parse_mode="HTML")
         return
     cmd = " ".join(context.args)
+    logger.info(f"Пользователь {user.id} (@{user.username or 'unknown'}) запускает команду: {cmd}")
     
     try:
         # Выполнение команды в отдельном потоке
@@ -166,12 +183,15 @@ async def cmd_exec(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(output) > 4000:
             output = output[:4000] + "\n... [вывод усечён]"
         await update.message.reply_text(f"<pre>{output}</pre>", parse_mode="HTML")
+        logger.info(f"Команда '{cmd}' успешно выполнена (код возврата: {r.returncode})")
     except Exception as e:
+        logger.error(f"Ошибка при выполнении команды '{cmd}': {e}", exc_info=True)
         await update.message.reply_text(f"Ошибка выполнения: {e}")
 
 
 async def cmd_get(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update.effective_user.id): 
+    user = update.effective_user
+    if not allowed(user.id): 
         return
     if not context.args:
         await update.message.reply_text("Использование: /get &lt;путь_к_файлу&gt;", parse_mode="HTML")
@@ -179,10 +199,14 @@ async def cmd_get(update: Update, context: ContextTypes.DEFAULT_TYPE):
     path_str = " ".join(context.args)
     path = Path(path_str)
     
+    logger.info(f"Пользователь {user.id} (@{user.username or 'unknown'}) запросил скачивание файла: {path_str}")
+    
     if not path.exists():
+        logger.warning(f"Файл не найден при скачивании: {path_str}")
         await update.message.reply_text("Файл не найден.")
         return
     if not path.is_file():
+        logger.warning(f"Путь не является файлом при скачивании: {path_str}")
         await update.message.reply_text("Указанный путь не является файлом.")
         return
         
@@ -194,13 +218,17 @@ async def cmd_get(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 document=f,
                 filename=path.name
             )
+        logger.info(f"Файл {path_str} успешно отправлен пользователю {user.id}")
     except Exception as e:
+        logger.error(f"Ошибка отправки файла '{path_str}': {e}", exc_info=True)
         await update.message.reply_text(f"Ошибка отправки файла: {e}")
 
 
 async def cmd_put(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update.effective_user.id): 
+    user = update.effective_user
+    if not allowed(user.id): 
         return
+    logger.info(f"Пользователь {user.id} (@{user.username or 'unknown'}) запросил инструкцию по загрузке файлов (/put)")
     await update.message.reply_text(
         "Чтобы загрузить файл на ПК, просто пришлите его мне как документ (файл).\n"
         "Он будет сохранен в последнюю открытую вами папку или в рабочую директорию бота."
@@ -208,7 +236,8 @@ async def cmd_put(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update.effective_user.id): 
+    user = update.effective_user
+    if not allowed(user.id): 
         return
     
     chat_id = update.effective_chat.id
@@ -224,18 +253,24 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
     dest_path = dest_dir / doc.file_name
     
+    logger.info(f"Пользователь {user.id} (@{user.username or 'unknown'}) прислал документ: {doc.file_name} для сохранения в {dest_dir}")
+    
     try:
         # Скачиваем файл в отдельном потоке
         new_file = await context.bot.get_file(doc.file_id)
         await new_file.download_to_drive(custom_path=dest_path)
         await update.message.reply_text(f"Файл успешно сохранен в: <code>{dest_path}</code>", parse_mode="HTML")
+        logger.info(f"Документ {doc.file_name} успешно сохранен в: {dest_path}")
     except Exception as e:
+        logger.error(f"Ошибка сохранения файла {doc.file_name} в {dest_path}: {e}", exc_info=True)
         await update.message.reply_text(f"Ошибка сохранения файла: {e}")
 
 
 async def cmd_sys(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update.effective_user.id): 
+    user = update.effective_user
+    if not allowed(user.id): 
         return
+    logger.info(f"Пользователь {user.id} (@{user.username or 'unknown'}) запросил системный статус (/sys)")
     try:
         import psutil
         cpu = psutil.cpu_percent(interval=0.5)
@@ -277,8 +312,10 @@ async def cmd_sys(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_ps(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update.effective_user.id): 
+    user = update.effective_user
+    if not allowed(user.id): 
         return
+    logger.info(f"Пользователь {user.id} (@{user.username or 'unknown'}) запросил список процессов (/ps)")
     try:
         import psutil
         
@@ -301,7 +338,9 @@ async def cmd_ps(update: Update, context: ContextTypes.DEFAULT_TYPE):
             procs = procs[:4000] + "\n... [вывод усечён]"
             
         await update.message.reply_text(f"<pre>{procs}</pre>", parse_mode="HTML")
+        logger.info(f"Список процессов успешно отправлен пользователю {user.id}")
     except ImportError:
+        logger.warning("Не удалось выполнить /ps: библиотека psutil не установлена")
         await update.message.reply_text(
             "Для работы этой команды необходима библиотека <code>psutil</code>.\n"
             "Вы можете установить её с помощью:\n"
@@ -311,7 +350,8 @@ async def cmd_ps(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update.effective_user.id): 
+    user = update.effective_user
+    if not allowed(user.id): 
         return
     if not context.args:
         await update.message.reply_text("Использование: /kill &lt;PID&gt;", parse_mode="HTML")
@@ -323,11 +363,14 @@ async def cmd_kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("PID должен быть числом.")
         return
         
+    logger.info(f"Пользователь {user.id} (@{user.username or 'unknown'}) запросил завершение процесса с PID {pid}")
+    
     try:
         import psutil
         process = psutil.Process(pid)
         process.terminate()
         await update.message.reply_text(f"Сигнал завершения отправлен процессу {pid} ({process.name()}).")
+        logger.info(f"Сигнал завершения (psutil) отправлен процессу {pid} ({process.name()})")
     except ImportError:
         # Системное завершение через subprocess
         try:
@@ -335,19 +378,25 @@ async def cmd_kill(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 cmd = f"taskkill /F /PID {pid}"
             else:
                 cmd = f"kill -9 {pid}"
+            logger.info(f"Библиотека psutil отсутствует. Выполнение системной команды для завершения PID {pid}: {cmd}")
             r = await asyncio.to_thread(subprocess.run, cmd, shell=True, capture_output=True, text=True)
             if r.returncode == 0:
                 await update.message.reply_text(f"Процесс {pid} завершен системной командой.")
+                logger.info(f"Процесс {pid} успешно завершен системной командой")
             else:
                 await update.message.reply_text(f"Ошибка: {r.stderr or r.stdout}")
+                logger.error(f"Системная команда завершения процесса {pid} завершилась ошибкой: {r.stderr or r.stdout}")
         except Exception as e:
+            logger.error(f"Ошибка при системном завершении процесса {pid}: {e}", exc_info=True)
             await update.message.reply_text(f"Ошибка завершения процесса: {e}")
     except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+        logger.error(f"Не удалось завершить процесс {pid} через psutil: {e}", exc_info=True)
         await update.message.reply_text(f"Не удалось завершить процесс {pid}: {e}")
 
 
 async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update.effective_user.id): 
+    user = update.effective_user
+    if not allowed(user.id): 
         return
     if not context.args:
         await update.message.reply_text("Использование: /find &lt;маска_файла&gt; [стартовая_папка]", parse_mode="HTML")
@@ -355,6 +404,8 @@ async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     pattern = context.args[0]
     start_dir = context.args[1] if len(context.args) > 1 else "."
+    
+    logger.info(f"Пользователь {user.id} (@{user.username or 'unknown'}) запустил поиск файлов '{pattern}' в '{start_dir}'")
     
     def search():
         matches = []
@@ -374,6 +425,7 @@ async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
         matches, truncated = await asyncio.to_thread(search)
         
         if not matches:
+            logger.info(f"Поиск '{pattern}' в '{start_dir}' не дал результатов")
             await update.message.reply_text("Ничего не найдено.")
             return
             
@@ -385,12 +437,15 @@ async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE):
             res_text = res_text[:4000] + "\n... [вывод усечён]"
             
         await update.message.reply_text(f"<pre>{res_text}</pre>", parse_mode="HTML")
+        logger.info(f"Поиск '{pattern}' завершен. Найдено результатов: {len(matches)} (усечено: {truncated})")
     except Exception as e:
+        logger.error(f"Ошибка при поиске '{pattern}': {e}", exc_info=True)
         await update.message.reply_text(f"Ошибка при поиске: {e}")
 
 
 async def cmd_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not allowed(update.effective_user.id): 
+    user = update.effective_user
+    if not allowed(user.id): 
         return
     if not context.args:
         await update.message.reply_text("Использование: /cat &lt;путь_к_файлу&gt;", parse_mode="HTML")
@@ -399,10 +454,14 @@ async def cmd_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     path_str = " ".join(context.args)
     path = Path(path_str)
     
+    logger.info(f"Пользователь {user.id} (@{user.username or 'unknown'}) запросил просмотр файла (/cat): {path_str}")
+    
     if not path.exists():
+        logger.warning(f"Файл не найден при просмотре (/cat): {path_str}")
         await update.message.reply_text("Файл не найден.")
         return
     if not path.is_file():
+        logger.warning(f"Путь не является файлом при просмотре (/cat): {path_str}")
         await update.message.reply_text("Указанный путь не является файлом.")
         return
         
@@ -419,5 +478,7 @@ async def cmd_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             escaped_text = escaped_text[:4000] + "\n... [вывод усечён]"
             
         await update.message.reply_text(f"<pre>{escaped_text}</pre>", parse_mode="HTML")
+        logger.info(f"Содержимое файла {path_str} успешно отправлено пользователю {user.id}")
     except Exception as e:
+        logger.error(f"Ошибка чтения файла '{path_str}': {e}", exc_info=True)
         await update.message.reply_text(f"Ошибка чтения файла: {e}")
