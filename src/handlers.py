@@ -13,7 +13,7 @@ from telegram.ext import ContextTypes
 logger = logging.getLogger("bot.handlers")
 
 # Конфиг и вспомогательные функции
-from src.config import allowed, set_bot_username, get_bot_username
+from src.config import allowed, set_bot_username, get_bot_username, connect_user, get_connected_user
 from src.registry import dereg
 from src.models import (
     Row, Tree, get_tree, get_msg_id, set_tree, set_msg_id
@@ -184,6 +184,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 #  ХЭНДЛЕРЫ — КОМАНДЫ ДЛЯ УПРАВЛЕНИЯ ПК
 # ══════════════════════════════════════════════════════════════
 
+async def cmd_connect(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not allowed(user.id): 
+        return
+        
+    current_connected = get_connected_user()
+    if current_connected is not None:
+        if current_connected == user.id:
+            await update.message.reply_text("Вы уже привязаны к этому боту.")
+        return
+
+    logger.info(f"User {user.id}: /connect - connecting user")
+    success = connect_user(user.id)
+    if success:
+        await update.message.reply_text(
+            f"Бот успешно привязан к вашему аккаунту (ID: <code>{user.id}</code>).\n"
+            f"Доступ для остальных пользователей заблокирован.",
+            parse_mode="HTML"
+        )
+    else:
+        await update.message.reply_text("Не удалось привязать бота. Проверьте логи сервера.")
+
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not allowed(user.id): 
@@ -195,6 +218,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /start — файловое дерево\n"
         "  Нажмите на 📁 — раскрыть / свернуть папку\n\n"
         "<b>Управление:</b>\n"
+        "  /connect     — привязать бота к вашему аккаунту\n"
         "  /exec &lt;cmd&gt;  — выполнить команду\n"
         "  /get  &lt;path&gt; — скачать файл\n"
         "  /put         — инструкция для загрузки файлов на ПК\n"

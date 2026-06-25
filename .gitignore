@@ -32,6 +32,7 @@ ENV/
 env.bak
 env.rm
 *.db
+.connected_user
 
 
 # IDEs

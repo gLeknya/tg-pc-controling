@@ -1,5 +1,6 @@
 import os
 import logging
+from typing import Optional
 
 # Настройка логирования в консоль (простой и лаконичный формат)
 logging.basicConfig(
@@ -43,6 +44,20 @@ if ALLOWED_USERS_RAW:
 else:
     logger.info("Доступ открыт для всех (нет ограничений)")
 
+# Хранение ID привязанного пользователя
+CONNECTED_USER_ID: Optional[int] = None
+
+# Загрузка привязанного пользователя при старте
+if os.path.exists(".connected_user"):
+    try:
+        with open(".connected_user", "r", encoding="utf-8") as f:
+            content = f.read().strip()
+            if content:
+                CONNECTED_USER_ID = int(content)
+                logger.info(f"Привязанный пользователь: {CONNECTED_USER_ID}")
+    except Exception as e:
+        logger.error(f"Ошибка чтения .connected_user: {e}")
+
 MAX_ITEMS = int(os.getenv("MAX_ITEMS", "30"))
 
 SYMBOLS = ['•', '+', '×', '⁕', '⁜', '※']
@@ -58,7 +73,33 @@ def set_bot_username(username: str):
 def get_bot_username() -> str:
     return _bot_username
 
+def get_connected_user() -> Optional[int]:
+    return CONNECTED_USER_ID
+
+def connect_user(uid: int) -> bool:
+    global CONNECTED_USER_ID
+    if CONNECTED_USER_ID is not None and CONNECTED_USER_ID != uid:
+        return False
+    
+    CONNECTED_USER_ID = uid
+    try:
+        with open(".connected_user", "w", encoding="utf-8") as f:
+            f.write(str(uid))
+        logger.info(f"Бот привязан к UID {uid}")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения .connected_user: {e}")
+        return False
+
 def allowed(uid: int) -> bool:
+    # Если бот уже к кому-то привязан, доступ разрешен только ему
+    if CONNECTED_USER_ID is not None:
+        is_allowed = (uid == CONNECTED_USER_ID)
+        if not is_allowed:
+            logger.warning(f"Доступ отклонен для UID {uid} (привязан к {CONNECTED_USER_ID})")
+        return is_allowed
+        
+    # Иначе проверяем ALLOWED_USERS из .env
     is_allowed = not ALLOWED_USERS or uid in ALLOWED_USERS
     if not is_allowed:
         logger.warning(f"Доступ отклонен для UID {uid}")

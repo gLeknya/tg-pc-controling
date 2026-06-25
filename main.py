@@ -13,6 +13,7 @@ from src.config import BOT_TOKEN
 from src.handlers import (
     cmd_start, 
     cmd_help, 
+    cmd_connect,
     cmd_exec, 
     cmd_get, 
     cmd_put, 
@@ -41,6 +42,7 @@ if __name__ == "__main__":
     # Хэндлеры навигации и справки
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help",  cmd_help))
+    app.add_handler(CommandHandler("connect", cmd_connect))
     
     # Хэндлеры управления ПК
     app.add_handler(CommandHandler("exec",  cmd_exec))
