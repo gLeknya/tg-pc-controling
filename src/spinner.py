@@ -1,17 +1,12 @@
 import asyncio
 import random
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Bot
 from telegram.error import TelegramError, BadRequest
 from src.config import SYMBOLS, WORDS
 from src.models import (
     get_tree, get_msg_id, get_task, set_task, pop_task, pop_tree, pop_msg_id
 )
 from src.rendering import render
-
-def get_photo_markup() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("❌ Скрыть фото", callback_data="hide_photo")
-    ]])
 
 # ══════════════════════════════════════════════════════════════
 #  СПИННЕР
@@ -30,18 +25,11 @@ async def _spin_loop(bot: Bot, chat_id: int):
         elif tree.spin_idx < 0:           tree.spin_idx, tree.spin_dir = 1, 1
 
         try:
-            if tree.current_photo:
-                await bot.edit_message_caption(
-                    chat_id=chat_id, message_id=msg_id,
-                    caption=render(tree), parse_mode="HTML",
-                    reply_markup=get_photo_markup()
-                )
-            else:
-                await bot.edit_message_text(
-                    chat_id=chat_id, message_id=msg_id,
-                    text=render(tree), parse_mode="HTML",
-                    disable_web_page_preview=True,
-                )
+            await bot.edit_message_text(
+                chat_id=chat_id, message_id=msg_id,
+                text=render(tree), parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
         except BadRequest as e:
             if "not modified" not in str(e).lower(): break
         except TelegramError:
@@ -77,18 +65,11 @@ async def edit_message(bot: Bot, chat_id: int):
     msg_id = get_msg_id(chat_id)
     if not tree or not msg_id: return
     try:
-        if tree.current_photo:
-            await bot.edit_message_caption(
-                chat_id=chat_id, message_id=msg_id,
-                caption=render(tree), parse_mode="HTML",
-                reply_markup=get_photo_markup()
-            )
-        else:
-            await bot.edit_message_text(
-                chat_id=chat_id, message_id=msg_id,
-                text=render(tree), parse_mode="HTML",
-                disable_web_page_preview=True,
-            )
+        await bot.edit_message_text(
+            chat_id=chat_id, message_id=msg_id,
+            text=render(tree), parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
     except BadRequest as e:
         # Сообщение удалено — сбрасываем состояние
         if "message to edit not found" in str(e).lower():

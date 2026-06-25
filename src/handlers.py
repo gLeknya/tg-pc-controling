@@ -20,7 +20,7 @@ from src.models import (
 )
 from src.fs import get_drives, listdir
 from src.rendering import render, build_rows, collapse_row
-from src.spinner import start_spin, stop_spin, edit_message, get_photo_markup
+from src.spinner import start_spin, stop_spin, edit_message
 
 # ══════════════════════════════════════════════════════════════
 #  ХЭНДЛЕРЫ — НАВИГАЦИЯ
@@ -153,84 +153,31 @@ async def _view_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, key: s
 
     logger.info(f"User {user.id}: view photo {path}")
 
-    tree = get_tree(chat_id)
-    msg_id = get_msg_id(chat_id)
-
-    if not tree or not msg_id:
-        logger.info(f"Chat {chat_id}: active tree not found on view photo, restarting")
-        await cmd_start(update, context)
-        return
-
-    # Записываем выбранное фото в состояние дерева
-    tree.current_photo = path
-    tree.photo_file_id = None
-    
-    # Удаляем старое текстовое сообщение или сообщение с предыдущим фото
-    try:
-        await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
-    except TelegramError:
-        pass
-        
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     try:
         with open(path, "rb") as f:
-            msg = await context.bot.send_photo(
+            await context.bot.send_photo(
                 chat_id=chat_id,
                 photo=f,
-                caption=render(tree),
-                parse_mode="HTML",
-                reply_markup=get_photo_markup()
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("❌ Закрыть", callback_data="close_photo")
+                ]])
             )
-        set_msg_id(chat_id, msg.message_id)
-        if msg.photo:
-            tree.photo_file_id = msg.photo[-1].file_id
     except Exception as e:
-        logger.error(f"User {user.id}: failed to view photo '{path}': {e}")
-        tree.current_photo = None
-        tree.photo_file_id = None
-        await update.effective_chat.send_message(f"Ошибка при открытии фото: {e}")
-        msg = await update.effective_chat.send_message(
-            text=render(tree),
-            parse_mode="HTML",
-            disable_web_page_preview=True
-        )
-        set_msg_id(chat_id, msg.message_id)
-
-
-async def cmd_hide_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    user = update.effective_user
-    tree = get_tree(chat_id)
-    msg_id = get_msg_id(chat_id)
-    if not tree or not msg_id:
-        return
-        
-    logger.info(f"User {user.id}: hide photo")
-    
-    # Сбрасываем фото в состоянии дерева
-    tree.current_photo = None
-    tree.photo_file_id = None
-    
-    # Удаляем сообщение с фото
-    try:
-        await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
-    except TelegramError:
-        pass
-        
-    # Отправляем новое текстовое сообщение с деревом
-    msg = await update.effective_chat.send_message(
-        text=render(tree),
-        parse_mode="HTML",
-        disable_web_page_preview=True
-    )
-    set_msg_id(chat_id, msg.message_id)
+        logger.error(f"User {user.id}: failed to send photo '{path}': {e}")
+        await update.effective_chat.send_message(f"Ошибка при отправке фото: {e}")
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    if query.data == "hide_photo":
-        await cmd_hide_photo(update, context)
+    if query.data == "close_photo":
+        try:
+            await query.message.delete()
+            logger.info(f"User {update.effective_user.id}: closed photo message")
+        except TelegramError as e:
+            logger.error(f"Failed to delete photo message: {e}")
 
 
 # ══════════════════════════════════════════════════════════════
