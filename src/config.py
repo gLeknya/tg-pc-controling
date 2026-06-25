@@ -1,16 +1,17 @@
 import os
 import logging
 
-# Настройка логирования в консоль
+# Настройка логирования в консоль (простой и лаконичный формат)
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="[%(asctime)s] [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
     level=logging.INFO
 )
-logger = logging.getLogger("bot.config")
+logger = logging.getLogger("bot")
 
 # Загрузка переменных окружения из .env
 if os.path.exists(".env"):
-    logger.info("Загрузка переменных окружения из .env")
+    logger.info("Загрузка .env")
     with open(".env", "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -21,7 +22,7 @@ if os.path.exists(".env"):
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 if not BOT_TOKEN:
-    logger.error("BOT_TOKEN отсутствует в файле .env!")
+    logger.error("BOT_TOKEN не найден в .env!")
     raise ValueError("BOT_TOKEN не установлен в .env или переменных окружения!")
 
 
@@ -31,11 +32,11 @@ ALLOWED_USERS_RAW = os.getenv("ALLOWED_USERS", "")
 if ALLOWED_USERS_RAW:
     try:
         ALLOWED_USERS = [int(uid.strip()) for uid in ALLOWED_USERS_RAW.split(",") if uid.strip()]
-        logger.info(f"Загружен белый список пользователей ({len(ALLOWED_USERS)} ID): {ALLOWED_USERS}")
+        logger.info(f"Разрешенные ID: {ALLOWED_USERS}")
     except ValueError as e:
-        logger.error(f"Ошибка при парсинге ALLOWED_USERS: {e}")
+        logger.error(f"Ошибка ALLOWED_USERS: {e}")
 else:
-    logger.info("Белый список пользователей пуст (доступ разрешен всем)")
+    logger.info("Доступ открыт для всех (нет ограничений)")
 
 MAX_ITEMS = int(os.getenv("MAX_ITEMS", "30"))
 
@@ -55,5 +56,5 @@ def get_bot_username() -> str:
 def allowed(uid: int) -> bool:
     is_allowed = not ALLOWED_USERS or uid in ALLOWED_USERS
     if not is_allowed:
-        logger.warning(f"Доступ заблокирован для пользователя: {uid} (не входит в список разрешённых)")
+        logger.warning(f"Доступ отклонен для UID {uid}")
     return is_allowed
