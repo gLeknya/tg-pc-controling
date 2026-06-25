@@ -31,6 +31,8 @@ ENV/
 .venv
 env.bak
 env.rm
+*.db
+
 
 # IDEs
 .idea/
