@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 #  МОДЕЛЬ ДЕРЕВА
 # ══════════════════════════════════════════════════════════════
 
+from typing import Optional
+
 @dataclass
 class Row:
     path:         str
@@ -22,6 +24,8 @@ class Tree:
     spin_idx:    int = 0
     spin_dir:    int = 1
     spin_word:   str = ""
+    current_photo: Optional[str] = None
+    photo_file_id: Optional[str] = None
 
 # Состояние по чатам
 _trees: dict[int, Tree]         = {}

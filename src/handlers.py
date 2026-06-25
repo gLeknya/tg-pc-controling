@@ -20,7 +20,7 @@ from src.models import (
 )
 from src.fs import get_drives, listdir
 from src.rendering import render, build_rows, collapse_row
-from src.spinner import start_spin, stop_spin, edit_message
+from src.spinner import start_spin, stop_spin, edit_message, get_photo_markup
 
 # ══════════════════════════════════════════════════════════════
 #  ХЭНДЛЕРЫ — НАВИГАЦИЯ
@@ -34,6 +34,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User {user.id}: /start")
     set_bot_username(context.bot.username)
     chat_id = update.effective_chat.id
+
+    # Просмотр фото deep-link (пользователь кликнул на картинку)
+    if context.args and context.args[0].startswith("view_"):
+        await _view_photo(update, context, context.args[0][5:])
+        return
 
     # Навигационный deep-link (пользователь кликнул на папку)
     if context.args and context.args[0].startswith("cd_"):
@@ -128,6 +133,104 @@ async def _navigate(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str
     tree.rows[row_idx].expanded = True
 
     await edit_message(context.bot, chat_id)
+
+
+async def _view_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str):
+    """Вызывается когда пользователь кликнул на файл изображения."""
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+
+    # Удаляем "/start view_..." сообщение
+    try: 
+        await update.message.delete()
+    except TelegramError: 
+        pass
+
+    path = dereg(key)
+    if not path: 
+        logger.warning(f"User {user.id}: invalid view key {key}")
+        return
+
+    logger.info(f"User {user.id}: view photo {path}")
+
+    tree = get_tree(chat_id)
+    msg_id = get_msg_id(chat_id)
+
+    if not tree or not msg_id:
+        logger.info(f"Chat {chat_id}: active tree not found on view photo, restarting")
+        await cmd_start(update, context)
+        return
+
+    # Записываем выбранное фото в состояние дерева
+    tree.current_photo = path
+    tree.photo_file_id = None
+    
+    # Удаляем старое текстовое сообщение или сообщение с предыдущим фото
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+    except TelegramError:
+        pass
+        
+    try:
+        with open(path, "rb") as f:
+            msg = await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=f,
+                caption=render(tree),
+                parse_mode="HTML",
+                reply_markup=get_photo_markup()
+            )
+        set_msg_id(chat_id, msg.message_id)
+        if msg.photo:
+            tree.photo_file_id = msg.photo[-1].file_id
+    except Exception as e:
+        logger.error(f"User {user.id}: failed to view photo '{path}': {e}")
+        tree.current_photo = None
+        tree.photo_file_id = None
+        await update.effective_chat.send_message(f"Ошибка при открытии фото: {e}")
+        msg = await update.effective_chat.send_message(
+            text=render(tree),
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+        set_msg_id(chat_id, msg.message_id)
+
+
+async def cmd_hide_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    tree = get_tree(chat_id)
+    msg_id = get_msg_id(chat_id)
+    if not tree or not msg_id:
+        return
+        
+    logger.info(f"User {user.id}: hide photo")
+    
+    # Сбрасываем фото в состоянии дерева
+    tree.current_photo = None
+    tree.photo_file_id = None
+    
+    # Удаляем сообщение с фото
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+    except TelegramError:
+        pass
+        
+    # Отправляем новое текстовое сообщение с деревом
+    msg = await update.effective_chat.send_message(
+        text=render(tree),
+        parse_mode="HTML",
+        disable_web_page_preview=True
+    )
+    set_msg_id(chat_id, msg.message_id)
+
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "hide_photo":
+        await cmd_hide_photo(update, context)
 
 
 # ══════════════════════════════════════════════════════════════

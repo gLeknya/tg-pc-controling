@@ -29,6 +29,11 @@ def collapse_row(tree: Tree, idx: int):
     tree.rows = tree.rows[:idx + 1] + tree.rows[end:]
     tree.rows[idx].expanded = False
 
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'}
+
+def is_image(path_str: str) -> bool:
+    return Path(path_str).suffix.lower() in IMAGE_EXTENSIONS
+
 # ══════════════════════════════════════════════════════════════
 #  РЕНДЕРИНГ
 # ══════════════════════════════════════════════════════════════
@@ -45,7 +50,12 @@ def render(tree: Tree) -> str:
             url  = f"https://t.me/{bot_username}?start=cd_{key}"
             lines.append(f'{row.prefix}<a href="{url}">{icon} {row.name}</a>')
         else:
-            lines.append(f"{row.prefix}📄 {row.name}")
+            if is_image(row.path):
+                key = reg(row.path)
+                url = f"https://t.me/{bot_username}?start=view_{key}"
+                lines.append(f'{row.prefix}<a href="{url}">🖼 {row.name}</a>')
+            else:
+                lines.append(f"{row.prefix}📄 {row.name}")
 
         # Спиннер вставляется сразу после загружаемой строки
         if i == tree.loading_idx:

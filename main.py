@@ -6,7 +6,7 @@ SSH-бот — файловый менеджер через Telegram
 Этот файл является точкой входа. Вся логика разделена на модули в пакете src/.
 """
 
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
 # Импорт конфигурации и хэндлеров
 from src.config import BOT_TOKEN
@@ -21,7 +21,8 @@ from src.handlers import (
     cmd_kill, 
     cmd_find, 
     cmd_cat, 
-    handle_document
+    handle_document,
+    handle_callback
 )
 
 import logging
@@ -50,6 +51,9 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("kill",  cmd_kill))
     app.add_handler(CommandHandler("find",  cmd_find))
     app.add_handler(CommandHandler("cat",   cmd_cat))
+    
+    # Обработчик нажатия на инлайн-кнопки
+    app.add_handler(CallbackQueryHandler(handle_callback))
     
     # Прием файлов/документов
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
